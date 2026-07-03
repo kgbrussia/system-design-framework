@@ -1,5 +1,6 @@
 package pro.curator.antibot.sdk
 
+import pro.curator.antibot.protocol.Challenge
 import pro.curator.antibot.protocol.IntegrityVerdict
 import pro.curator.antibot.protocol.ReasonCode
 import pro.curator.antibot.protocol.Telemetry
@@ -83,7 +84,33 @@ public data class FeatureFlags(
     val collectTelemetry: Boolean = true,
     val runIntegrityChecks: Boolean = true,
     val attachTokenHeader: Boolean = true,
+    /** Request a Play Integrity token as part of the integrity check (guide §11). */
+    val playIntegrity: Boolean = true,
+    /** Solve a WebView/JS challenge when the server asks for a step-up (guide §14). */
+    val webViewChallenge: Boolean = true,
 )
+
+// ---- WebView challenge (guide §14) ----
+
+public sealed interface ChallengeResult {
+    public data class Solved(val answer: String) : ChallengeResult
+    public data class Failed(val reason: ReasonCode) : ChallengeResult
+}
+
+/**
+ * Solves a step-up challenge by loading [challenge].pageUrl (resolved against
+ * [baseUrl]) in a WebView and returning the answer the page produces. The Android
+ * layer implements this with a real WebView + JS bridge; core ships a no-op.
+ */
+public fun interface WebViewChallengeSolver {
+    public suspend fun solve(challenge: Challenge, baseUrl: String): ChallengeResult
+}
+
+/** Default when no WebView is available (pure-JVM core). */
+public object NoWebViewChallengeSolver : WebViewChallengeSolver {
+    override suspend fun solve(challenge: Challenge, baseUrl: String): ChallengeResult =
+        ChallengeResult.Failed(ReasonCode.CHALLENGE_FAILED)
+}
 
 // ---- Provider interfaces implemented by the Android layer (or fakes in tests) ----
 

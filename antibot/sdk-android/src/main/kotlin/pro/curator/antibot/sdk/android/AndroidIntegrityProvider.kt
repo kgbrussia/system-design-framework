@@ -17,6 +17,8 @@ import kotlin.coroutines.resume
 public class AndroidIntegrityProvider(
     private val context: Context,
     private val cloudProjectNumber: Long? = null,
+    /** Feature flag: whether to request a Play Integrity token at all (guide §11, §15.6). */
+    private val playIntegrityEnabled: Boolean = true,
 ) : IntegrityProvider {
 
     override suspend fun verdict(nonce: String): IntegrityVerdict {
@@ -32,7 +34,11 @@ public class AndroidIntegrityProvider(
         notes += hooking.notes.map { "hook:$it" }
 
         val playAvailable = isPlayServicesAvailable()
-        val playToken = if (playAvailable) requestPlayIntegrityToken(nonce) else null
+        val playToken = if (playIntegrityEnabled && playAvailable) {
+            requestPlayIntegrityToken(nonce)
+        } else {
+            null
+        }
 
         return IntegrityVerdict(
             rooted = root.detected,

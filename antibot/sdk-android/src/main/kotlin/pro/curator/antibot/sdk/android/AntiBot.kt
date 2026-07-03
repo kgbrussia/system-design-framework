@@ -45,8 +45,13 @@ public object AntiBot {
         val built = AntiBotClient(
             config = config,
             telemetryProvider = AndroidTelemetryProvider(appContext),
-            integrityProvider = AndroidIntegrityProvider(appContext),
+            integrityProvider = AndroidIntegrityProvider(
+                context = appContext,
+                cloudProjectNumber = null, // configure with your Google Cloud project number
+                playIntegrityEnabled = config.featureFlags.playIntegrity,
+            ),
             clientKeyProvider = KeystoreClientKeyProvider(),
+            challengeSolver = AndroidWebViewChallengeSolver(appContext),
             tokenStorage = EncryptedTokenStorage(appContext),
         )
         client = built

@@ -1,5 +1,6 @@
 package pro.curator.antibot.server
 
+import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -13,12 +14,14 @@ import io.ktor.server.plugins.defaultheaders.DefaultHeaders
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import kotlinx.serialization.Serializable
 import org.slf4j.event.Level
 import pro.curator.antibot.protocol.AntiBotJson
+import pro.curator.antibot.protocol.ChallengeSolution
 import pro.curator.antibot.protocol.ErrorResponse
 import pro.curator.antibot.protocol.NonceRequest
 import pro.curator.antibot.protocol.NonceResponse
@@ -100,6 +103,22 @@ public fun Application.antiBotModule(context: ServerContext) {
                 return@post
             }
             call.respond(context.attestationService.verify(req.token))
+        }
+
+        // WebView challenge page — LOCAL, TEST-ONLY (guide §14). Served by this
+        // server so the WebView has a trusted URL to load for integration testing.
+        get(Protocol.PATH_CHALLENGE_PAGE) {
+            call.respondText(ChallengePage.html(), ContentType.Text.Html)
+        }
+
+        // WebView challenge solution -> trust token.
+        post(Protocol.PATH_CHALLENGE_VERIFY) {
+            val solution = runCatching { call.receive<ChallengeSolution>() }.getOrNull()
+            if (solution == null) {
+                call.respond(HttpStatusCode.BadRequest, ErrorResponse(ReasonCode.UNKNOWN, "bad challenge solution"))
+                return@post
+            }
+            call.respond(context.attestationService.verifyChallenge(solution))
         }
 
         // Demo protected resource: enforces the trust token from the header.

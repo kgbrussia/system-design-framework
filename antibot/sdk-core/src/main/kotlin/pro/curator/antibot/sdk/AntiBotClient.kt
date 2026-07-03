@@ -17,6 +17,7 @@ public class AntiBotClient(
     telemetryProvider: TelemetryProvider,
     integrityProvider: IntegrityProvider,
     clientKeyProvider: ClientKeyProvider,
+    challengeSolver: WebViewChallengeSolver = NoWebViewChallengeSolver,
     tokenStorage: TokenStorage = InMemoryTokenStorage(),
     clock: Clock = SystemClock,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
@@ -28,6 +29,7 @@ public class AntiBotClient(
         telemetryProvider = telemetryProvider,
         integrityProvider = integrityProvider,
         clientKeyProvider = clientKeyProvider,
+        challengeSolver = challengeSolver,
         clock = clock,
         logger = logger,
     )

@@ -9,8 +9,8 @@ import pro.curator.antibot.protocol.RiskLevel
  * Server-side risk scoring (guide §19). Never a hard yes/no on the client:
  * signals are weighted into a score, which maps to a decision + reason codes.
  *
- * PlayIntegrity verification is stubbed here (needs a Google Cloud project);
- * the hook [verifyPlayIntegrity] shows exactly where it plugs in.
+ * The Play Integrity verdict is computed by [PlayIntegrityVerifier] and passed
+ * in; a null verdict means "not evaluated" (feature flag off) and is neutral.
  */
 public class RiskEngine(
     private val config: RiskConfig = RiskConfig(),
@@ -18,9 +18,12 @@ public class RiskEngine(
     public data class RiskConfig(
         val challengeThreshold: Int = 40,
         val denyThreshold: Int = 70,
-        // Shadow mode: compute + report the decision but never actually block (rollout §19.5).
-        val shadowMode: Boolean = false,
+        // Feature flags (guide §15.6).
+        val playIntegrityEnabled: Boolean = false,
         val requirePlayIntegrity: Boolean = false,
+        val challengeEnabled: Boolean = true,
+        // Shadow mode: compute + report the decision but never actually block (§19.5).
+        val shadowMode: Boolean = false,
     )
 
     public data class Assessment(
@@ -31,7 +34,11 @@ public class RiskEngine(
         val shadowed: Boolean,
     )
 
-    public fun assess(payload: EnvelopePayload): Assessment {
+    /**
+     * @param playIntegrity result of Play Integrity verification, or null if the
+     *   feature is disabled (then it is not scored at all).
+     */
+    public fun assess(payload: EnvelopePayload, playIntegrity: PlayIntegrityAssessment?): Assessment {
         var score = 0
         val reasons = mutableListOf<ReasonCode>()
         val integrity = payload.integrity
@@ -52,26 +59,33 @@ public class RiskEngine(
             score += 10
         }
 
-        // Play Integrity is the strongest signal when present (guide §11).
-        val piResult = verifyPlayIntegrity(integrity.playIntegrityToken, payload.nonce)
-        when (piResult) {
-            PlayIntegrityResult.UNAVAILABLE -> {
-                reasons += ReasonCode.INTEGRITY_UNAVAILABLE
-                score += if (config.requirePlayIntegrity) 40 else 15
+        // Play Integrity is the strongest signal when enabled (guide §11).
+        if (playIntegrity != null) {
+            when (playIntegrity.status) {
+                PlayIntegrityStatus.PASSED -> score -= 20 // strong trust signal lowers risk
+                PlayIntegrityStatus.FAILED -> {
+                    score += 50; reasons += ReasonCode.PLAY_INTEGRITY_FAILED
+                }
+                PlayIntegrityStatus.UNAVAILABLE -> {
+                    reasons += ReasonCode.INTEGRITY_UNAVAILABLE
+                    score += if (config.requirePlayIntegrity) 40 else 15
+                }
             }
-            PlayIntegrityResult.FAILED -> {
-                score += 50; reasons += ReasonCode.ATTESTATION_FAILED
-            }
-            PlayIntegrityResult.PASSED -> score -= 20 // strong trust signal lowers risk
         }
 
         score = score.coerceIn(0, 100)
 
-        val rawDecision = when {
+        var rawDecision = when {
             score >= config.denyThreshold -> Decision.DENY
             score >= config.challengeThreshold -> Decision.CHALLENGE
             else -> Decision.ALLOW
         }
+        // If challenges are disabled, a would-be CHALLENGE falls back to DENY.
+        if (rawDecision == Decision.CHALLENGE && !config.challengeEnabled) {
+            rawDecision = Decision.DENY
+        }
+        if (rawDecision == Decision.CHALLENGE) reasons += ReasonCode.CHALLENGE_REQUIRED
+
         val level = when {
             score >= config.denyThreshold -> RiskLevel.HIGH
             score >= config.challengeThreshold -> RiskLevel.MEDIUM
@@ -88,19 +102,5 @@ public class RiskEngine(
             score = score,
             shadowed = config.shadowMode && rawDecision != Decision.ALLOW,
         )
-    }
-
-    private enum class PlayIntegrityResult { PASSED, FAILED, UNAVAILABLE }
-
-    /**
-     * STUB. Real implementation calls Google Play Integrity server API to decrypt
-     * & verify the token, checks the request hash == our nonce, and reads the
-     * appIntegrity / deviceIntegrity verdicts.
-     */
-    private fun verifyPlayIntegrity(token: String?, expectedNonce: String): PlayIntegrityResult {
-        if (token.isNullOrBlank()) return PlayIntegrityResult.UNAVAILABLE
-        // Demo heuristic so the pipeline is exercisable without Google credentials:
-        // a token that echoes the nonce is treated as PASSED.
-        return if (token.contains(expectedNonce)) PlayIntegrityResult.PASSED else PlayIntegrityResult.FAILED
     }
 }

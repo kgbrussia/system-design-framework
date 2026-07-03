@@ -8,6 +8,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import pro.curator.antibot.protocol.AntiBotJson
 import pro.curator.antibot.protocol.AttestationResponse
+import pro.curator.antibot.protocol.ChallengeSolution
 import pro.curator.antibot.protocol.Decision
 import pro.curator.antibot.protocol.EnvelopeCrypto
 import pro.curator.antibot.protocol.EnvelopePayload
@@ -31,6 +32,7 @@ public class AttestationClient(
     private val telemetryProvider: TelemetryProvider,
     private val integrityProvider: IntegrityProvider,
     private val clientKeyProvider: ClientKeyProvider,
+    private val challengeSolver: WebViewChallengeSolver = NoWebViewChallengeSolver,
     private val clock: Clock = SystemClock,
     private val logger: Logger = Logger(config.debug),
     httpClient: OkHttpClient? = null,
@@ -96,28 +98,60 @@ public class AttestationClient(
             val attestation = postAttest(envelope)
                 ?: return@withContext Outcome.Error(ReasonCode.NETWORK_ERROR, retryable = true)
 
-            when (attestation.decision) {
-                Decision.ALLOW -> {
-                    val token = attestation.trustToken
-                    if (token.isNullOrBlank()) {
-                        Outcome.Error(ReasonCode.ATTESTATION_FAILED, retryable = true)
-                    } else {
-                        logger.d("attestation ALLOW, ttl=${attestation.ttlSeconds}s")
-                        Outcome.Token(token, attestation.ttlSeconds)
-                    }
-                }
-                Decision.CHALLENGE -> {
-                    logger.d("attestation CHALLENGE: ${attestation.reasonCodes}")
-                    Outcome.Rejected(attestation.reasonCodes.firstOrNull() ?: ReasonCode.ATTESTATION_FAILED)
-                }
-                Decision.DENY -> {
-                    logger.d("attestation DENY: ${attestation.reasonCodes}")
-                    Outcome.Rejected(attestation.reasonCodes.firstOrNull() ?: ReasonCode.ATTESTATION_FAILED)
-                }
-            }
+            interpret(attestation)
         } catch (e: Exception) {
             logger.e("attestation flow failed", e)
             Outcome.Error(ReasonCode.NETWORK_ERROR, retryable = true)
+        }
+    }
+
+    private suspend fun interpret(attestation: AttestationResponse): Outcome =
+        when (attestation.decision) {
+            Decision.ALLOW -> {
+                val token = attestation.trustToken
+                if (token.isNullOrBlank()) {
+                    Outcome.Error(ReasonCode.ATTESTATION_FAILED, retryable = true)
+                } else {
+                    logger.d("attestation ALLOW, ttl=${attestation.ttlSeconds}s")
+                    Outcome.Token(token, attestation.ttlSeconds)
+                }
+            }
+            Decision.CHALLENGE -> handleChallenge(attestation)
+            Decision.DENY -> {
+                logger.d("attestation DENY: ${attestation.reasonCodes}")
+                Outcome.Rejected(attestation.reasonCodes.firstOrNull() ?: ReasonCode.ATTESTATION_FAILED)
+            }
+        }
+
+    /** Step-up: solve the WebView challenge and re-submit for a token (guide §14). */
+    private suspend fun handleChallenge(attestation: AttestationResponse): Outcome {
+        val challenge = attestation.challenge
+        if (!config.featureFlags.webViewChallenge || challenge == null) {
+            logger.d("challenge required but disabled/absent")
+            return Outcome.Rejected(ReasonCode.CHALLENGE_REQUIRED)
+        }
+        logger.d("solving WebView challenge ${challenge.challengeId}")
+        return when (val solved = challengeSolver.solve(challenge, config.baseUrl)) {
+            is ChallengeResult.Failed -> Outcome.Rejected(solved.reason)
+            is ChallengeResult.Solved -> {
+                val identity = clientKeyProvider.identityKeyPair()
+                val solution = ChallengeSolution(
+                    challengeId = challenge.challengeId,
+                    answer = solved.answer,
+                    clientIdPublicKey = pro.curator.antibot.protocol.CryptoPrimitives
+                        .encodePublicKey(identity.public),
+                )
+                val verifyResp = postChallengeVerify(solution)
+                    ?: return Outcome.Error(ReasonCode.NETWORK_ERROR, retryable = true)
+                // The verify response is a normal AttestationResponse (ALLOW/DENY),
+                // never another CHALLENGE — interpret without recursing further.
+                when (verifyResp.decision) {
+                    Decision.ALLOW -> verifyResp.trustToken
+                        ?.let { Outcome.Token(it, verifyResp.ttlSeconds) }
+                        ?: Outcome.Error(ReasonCode.ATTESTATION_FAILED, retryable = true)
+                    else -> Outcome.Rejected(verifyResp.reasonCodes.firstOrNull() ?: ReasonCode.CHALLENGE_FAILED)
+                }
+            }
         }
     }
 
@@ -149,6 +183,18 @@ public class AttestationClient(
                 return runCatching { AntiBotJson.decodeFromString<AttestationResponse>(text) }.getOrNull()
             }
             return AntiBotJson.decodeFromString<AttestationResponse>(text)
+        }
+    }
+
+    private fun postChallengeVerify(solution: ChallengeSolution): AttestationResponse? {
+        val body = AntiBotJson.encodeToString(solution).toRequestBody(jsonMedia)
+        val request = Request.Builder()
+            .url(config.baseUrl + Protocol.PATH_CHALLENGE_VERIFY)
+            .post(body)
+            .build()
+        http.newCall(request).execute().use { resp ->
+            val text = resp.body?.string() ?: return null
+            return runCatching { AntiBotJson.decodeFromString<AttestationResponse>(text) }.getOrNull()
         }
     }
 }

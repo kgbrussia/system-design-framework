@@ -116,6 +116,51 @@ val retrofit = Retrofit.Builder().client(http).baseUrl("https://api.example.com"
 - **Часы устройства врут** → timestamp проверяется сервером в окне ±120с; TTL считает сервер.
 - **Повторная init()** → безопасно (idempotent).
 
+## Play Integrity (полная серверная верификация)
+
+Верификация вердикта Play Integrity реализована полностью на сервере
+(`GooglePlayIntegrityVerifier`): реальный вызов Google
+`POST /v1/{packageName}:decodeIntegrityToken`, разбор вердиктов
+(`appRecognitionVerdict`, `deviceRecognitionVerdict`, `appLicensingVerdict`),
+**привязка к nonce** (anti-replay) и к packageName, подача результата в risk scoring.
+
+**Заглушкой оставлена только настройка** — получение OAuth-токена сервисного
+аккаунта Google: интерфейс `AccessTokenProvider`. По умолчанию `StubAccessTokenProvider`
+(credentials не заданы → Play Integrity gracefully unavailable). Для теста/ручного
+запуска можно подставить готовый токен через `StaticAccessTokenProvider` или env
+`ANTIBOT_PLAY_INTEGRITY_ACCESS_TOKEN`.
+
+Всё закрыто **фиче-флагами**:
+- Сервер: `ANTIBOT_PLAY_INTEGRITY_ENABLED` (по умолчанию `false`),
+  `ANTIBOT_REQUIRE_PLAY_INTEGRITY` (жёсткость при отсутствии вердикта).
+- Клиент: `FeatureFlags.playIntegrity` — запрашивать ли токен на устройстве.
+
+Клиент (`AndroidIntegrityProvider`) уже запрашивает Play Integrity токен через
+`IntegrityManager`, привязывая его к серверному nonce.
+
+## WebView challenge (step-up)
+
+Когда risk score попадает в «средний» диапазон, сервер возвращает
+`Decision.CHALLENGE` с объектом `Challenge` (§14 гайда). Дальше:
+
+1. Сервер отдаёт **локальную тестовую HTML-страницу** по
+   `GET /v1/challenge/page?cid=…&n=…` (`ChallengePage`). Её JS вычисляет
+   `sha256("curator:cid:n")` и возвращает ответ нативу через JS-bridge
+   `AntiBotBridge.onChallengeSolved(...)`.
+2. `AndroidWebViewChallengeSolver` загружает страницу в WebView (JS только для
+   доверенного origin, навигация наружу заблокирована, WebView одноразовый),
+   получает ответ.
+3. SDK шлёт `POST /v1/challenge/verify`, сервер сверяет ответ и выдаёт trust token.
+
+Страница **локальная и тестовая** — её единственная задача проверить связку
+натив ↔ WebView ↔ сервер. Реальный JS-challenge был бы непрозрачным и собирал бы
+browser fingerprint. Флаг клиента: `FeatureFlags.webViewChallenge`; на сервере —
+`ANTIBOT_CHALLENGE_ENABLED` (при выключении CHALLENGE вырождается в DENY).
+
+Покрыто тестами: `ChallengeAndPlayIntegrityTest` (challenge-flow, неверный ответ,
+отдача HTML, парсинг вердикта Google через MockWebServer, DENY при FAILED),
+`SdkChallengeTest` (SDK решает challenge через солвер, нет солвера → отказ, флаг off).
+
 ## Стек
 
 Kotlin 2.1, Ktor 3.0, Coroutines 1.9, kotlinx.serialization 1.7, OkHttp 4.12,

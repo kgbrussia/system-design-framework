@@ -8,18 +8,24 @@ import java.security.KeyPair
  *
  * The private key stays on the server; the PUBLIC key is what the SDK is
  * configured with (so it can seal envelopes to us and verify trust tokens).
- * The key can be supplied via env vars for stable deployments, otherwise a
- * fresh pair is generated on boot (fine for local runs and tests).
  */
 public class ServerContext(
     public val serverKeys: KeyPair,
-    riskConfig: RiskEngine.RiskConfig = RiskEngine.RiskConfig(),
+    public val riskConfig: RiskEngine.RiskConfig = RiskEngine.RiskConfig(),
+    playIntegrityVerifier: PlayIntegrityVerifier = DisabledPlayIntegrityVerifier,
     nonceTtlMillis: Long = 60_000,
 ) {
     public val nonceStore: NonceStore = NonceStore(ttlMillis = nonceTtlMillis)
+    public val challengeStore: ChallengeStore = ChallengeStore()
     public val riskEngine: RiskEngine = RiskEngine(riskConfig)
-    public val attestationService: AttestationService =
-        AttestationService(serverKeys, nonceStore, riskEngine)
+    public val attestationService: AttestationService = AttestationService(
+        serverKeys = serverKeys,
+        nonceStore = nonceStore,
+        riskEngine = riskEngine,
+        riskConfig = riskConfig,
+        playIntegrityVerifier = playIntegrityVerifier,
+        challengeStore = challengeStore,
+    )
 
     /** Base64url X.509 public key — copy this into the SDK config. */
     public val publicKeyEncoded: String = CryptoPrimitives.encodePublicKey(serverKeys.public)
@@ -33,8 +39,33 @@ public class ServerContext(
             } else {
                 CryptoPrimitives.generateEcKeyPair()
             }
-            val shadow = System.getenv("ANTIBOT_SHADOW_MODE")?.toBoolean() ?: false
-            return ServerContext(keys, RiskEngine.RiskConfig(shadowMode = shadow))
+
+            val riskConfig = RiskEngine.RiskConfig(
+                playIntegrityEnabled = envFlag("ANTIBOT_PLAY_INTEGRITY_ENABLED", default = false),
+                requirePlayIntegrity = envFlag("ANTIBOT_REQUIRE_PLAY_INTEGRITY", default = false),
+                challengeEnabled = envFlag("ANTIBOT_CHALLENGE_ENABLED", default = true),
+                shadowMode = envFlag("ANTIBOT_SHADOW_MODE", default = false),
+            )
+
+            // Play Integrity credentials are the ONLY stubbed part. Configure a real
+            // service-account token minter here; a static token can be injected via env
+            // for testing, otherwise verification is gracefully unavailable.
+            val accessTokenProvider: AccessTokenProvider =
+                System.getenv("ANTIBOT_PLAY_INTEGRITY_ACCESS_TOKEN")
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { StaticAccessTokenProvider(it) }
+                    ?: StubAccessTokenProvider
+
+            val verifier = if (riskConfig.playIntegrityEnabled) {
+                GooglePlayIntegrityVerifier(accessTokenProvider)
+            } else {
+                DisabledPlayIntegrityVerifier
+            }
+
+            return ServerContext(keys, riskConfig, verifier)
         }
+
+        private fun envFlag(name: String, default: Boolean): Boolean =
+            System.getenv(name)?.toBooleanStrictOrNull() ?: default
     }
 }

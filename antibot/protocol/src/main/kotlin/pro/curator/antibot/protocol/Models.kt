@@ -22,9 +22,22 @@ public object Protocol {
     public const val PATH_ATTEST: String = "/v1/attest"
     public const val PATH_VERIFY: String = "/v1/verify"
     public const val PATH_PROTECTED: String = "/v1/protected"
+    public const val PATH_CHALLENGE_PAGE: String = "/v1/challenge/page"
+    public const val PATH_CHALLENGE_VERIFY: String = "/v1/challenge/verify"
 
     // HKDF info label bound to this envelope scheme.
     public val ENVELOPE_INFO: ByteArray = "curator-antibot/envelope/v1".toByteArray()
+}
+
+/**
+ * Test-only challenge answer, computed identically by the WebView JS (in the
+ * served page) and by the server on verify. Its only purpose is to prove the
+ * native -> WebView -> JS -> bridge -> server round-trip works end-to-end.
+ * A real challenge would be opaque and fingerprint-based, not reproducible.
+ */
+public object ChallengeCrypto {
+    public fun expectedAnswer(challengeId: String, challengeNonce: String): String =
+        CryptoPrimitives.sha256Hex("curator:$challengeId:$challengeNonce".toByteArray())
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +158,10 @@ public enum class ReasonCode {
     EMULATOR_DETECTED,
     DEBUGGER_DETECTED,
     HOOKING_DETECTED,
+    PLAY_INTEGRITY_FAILED,
+    CHALLENGE_REQUIRED,
+    CHALLENGE_FAILED,
+    CHALLENGE_EXPIRED,
     RATE_LIMITED,
     UNKNOWN,
 }
@@ -158,6 +175,36 @@ public data class AttestationResponse(
     val ttlSeconds: Long = 0,
     // In shadow mode the server would have blocked but still ALLOWs; useful for rollout.
     val shadow: Boolean = false,
+    // Present when decision == CHALLENGE: the WebView/JS challenge to solve (guide §14).
+    val challenge: Challenge? = null,
+)
+
+// ---------------------------------------------------------------------------
+// WebView / JavaScript challenge (guide §14)
+// ---------------------------------------------------------------------------
+
+/**
+ * A step-up challenge. The SDK loads [pageUrl] in a WebView; the page's JS
+ * computes an answer bound to [challengeId] + [challengeNonce] and returns it
+ * through the JS bridge; the SDK re-submits it to /v1/challenge/verify.
+ *
+ * The page here is a LOCAL, TEST-ONLY page served by this server whose only job
+ * is to exercise the native<->WebView<->server round-trip. A production JS
+ * challenge is opaque and also collects browser fingerprint signals.
+ */
+@Serializable
+public data class Challenge(
+    val challengeId: String,
+    val challengeNonce: String,
+    val pageUrl: String, // absolute or server-relative URL of the challenge page
+    val expiresAt: Long,
+)
+
+@Serializable
+public data class ChallengeSolution(
+    val challengeId: String,
+    val answer: String,
+    val clientIdPublicKey: String, // bind the solution to the same client
 )
 
 @Serializable
