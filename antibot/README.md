@@ -18,6 +18,7 @@ AES-256-GCM для «конверта», ES256-подписи, одноразо�
 | `protocol` | Kotlin/JVM, kotlinx.serialization, JCA | ✅ | DTO + криптография (envelope, trust token), общие для клиента и сервера |
 | `sdk-core` | Kotlin/JVM, OkHttp, Coroutines | ✅ | Ядро SDK: flow, TokenManager (single-flight + backoff), OkHttp-interceptor |
 | `sdk-android` | Android library, Keystore, EncryptedSharedPreferences, Play Integrity | ❌ (нужен Android SDK) | Тонкий Android-слой: телеметрия, детекторы, Keystore, `AntiBot` фасад |
+| `demo-app` | Android app, Jetpack Compose, Material3 | ❌ (нужен Android SDK) | Пример хост-приложения: интеграция SDK и весь путь на экране |
 | `server` | Ktor 3, Netty, kotlinx.serialization | ✅ | Сервер аттестации: `/nonce`, `/attest`, `/verify`, risk scoring, выдача токена |
 
 > `sdk-android` автоматически исключается из сборки, если не найден Android SDK
@@ -160,6 +161,31 @@ browser fingerprint. Флаг клиента: `FeatureFlags.webViewChallenge`; �
 Покрыто тестами: `ChallengeAndPlayIntegrityTest` (challenge-flow, неверный ответ,
 отдача HTML, парсинг вердикта Google через MockWebServer, DENY при FAILED),
 `SdkChallengeTest` (SDK решает challenge через солвер, нет солвера → отказ, флаг off).
+
+## Пример хост-приложения (`demo-app`)
+
+Android-приложение на Jetpack Compose, показывающее интеграцию SDK «вживую».
+Экран даёт кнопки на весь путь и лог результата:
+
+1. **Connect & Init** — тянет публичный ключ с `GET /v1/pubkey` и вызывает
+   `AntiBot.init(...)` (в проде ключ **пинится** в приложение, а не забирается с
+   сервера — это отмечено в коде и на экране).
+2. **Get Trust Token** — `AntiBot.getToken()` → показывает токен и срок/или reason code.
+3. **Call /v1/protected** — обычный `OkHttpClient` с `AntiBot.interceptor()`
+   ходит на защищённый роут; interceptor сам вешает trust token.
+4. **Invalidate Token** — сброс токена (демо реакции на 401/протухание).
+
+Запуск:
+```bash
+# 1) поднять сервер
+gradle :server:run
+# 2) открыть antibot/ в Android Studio, запустить конфигурацию demo-app на эмуляторе
+# 3) в приложении оставить URL http://10.0.2.2:8080 (10.0.2.2 = хост эмулятора) и нажать Connect
+```
+
+`demo-app` (как и `sdk-android`) требует Android SDK и автоматически исключается
+из чистой JVM-сборки. Разрешён cleartext HTTP только для локального тест-сервера
+(`network_security_config.xml`) — в проде только HTTPS (+ pinning).
 
 ## Стек
 

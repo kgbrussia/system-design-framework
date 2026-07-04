@@ -62,7 +62,7 @@ public fun Application.antiBotModule(context: ServerContext) {
         get("/health") { call.respond(mapOf("status" to "ok")) }
 
         // Dev helper: hand the SDK the public key to configure itself with.
-        get("/v1/pubkey") {
+        get(Protocol.PATH_PUBKEY) {
             call.respond(PublicKeyResponse(context.publicKeyEncoded))
         }
 

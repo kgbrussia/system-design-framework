@@ -22,6 +22,7 @@ public object Protocol {
     public const val PATH_ATTEST: String = "/v1/attest"
     public const val PATH_VERIFY: String = "/v1/verify"
     public const val PATH_PROTECTED: String = "/v1/protected"
+    public const val PATH_PUBKEY: String = "/v1/pubkey"
     public const val PATH_CHALLENGE_PAGE: String = "/v1/challenge/page"
     public const val PATH_CHALLENGE_VERIFY: String = "/v1/challenge/verify"
 

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP is allowed ONLY for the local test server (the emulator reaches
+  the host machine at 10.0.2.2). Everything else stays HTTPS-only. This is a
+  demo convenience; a production app talks to the anti-bot server over HTTPS
+  (ideally with certificate pinning — guide §6.5).
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

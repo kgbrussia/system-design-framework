@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose draws the UI; we only need a base Material theme with an action bar off. -->
+    <style name="Theme.AntiBotDemo" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

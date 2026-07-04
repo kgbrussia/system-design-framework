@@ -31,9 +31,10 @@ val androidAvailable =
 
 if (androidAvailable) {
     include(":sdk-android")
+    include(":demo-app")
 } else {
     logger.lifecycle(
-        "[curator-antibot] Android SDK not detected -> module ':sdk-android' is EXCLUDED from this build. " +
-            "Open the project in Android Studio (or set ANDROID_HOME) to build it.",
+        "[curator-antibot] Android SDK not detected -> modules ':sdk-android' and ':demo-app' are EXCLUDED " +
+            "from this build. Open the project in Android Studio (or set ANDROID_HOME) to build them.",
     )
 }
