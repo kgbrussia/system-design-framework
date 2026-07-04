@@ -21,6 +21,10 @@ AES-256-GCM для «конверта», ES256-подписи, одноразо�
 | `demo-app` | Android app, Jetpack Compose, Material3 | ❌ (нужен Android SDK) | Пример хост-приложения: интеграция SDK и весь путь на экране |
 | `server` | Ktor 3, Netty, kotlinx.serialization | ✅ | Сервер аттестации: `/nonce`, `/attest`, `/verify`, risk scoring, выдача токена |
 
+> 📖 Подробный разбор кода по шагам (для junior-разработчика, с крипто-ликбезом,
+> описанием каждой функции/модели и «почему так») — в
+> [`CODE_WALKTHROUGH.md`](CODE_WALKTHROUGH.md).
+
 > `sdk-android` автоматически исключается из сборки, если не найден Android SDK
 > (см. `settings.gradle.kts`), поэтому `gradle :server:build` и `gradle test`
 > работают на обычной JVM/CI. Откройте проект в Android Studio (или задайте
